@@ -1,0 +1,832 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2822
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\froman\fcharset0 TimesNewRomanPSMT;\f1\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;\red255\green0\blue0;}
+{\*\expandedcolortbl;;\csgenericrgb\c100000\c0\c0;}
+\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\deftab709
+\pard\pardeftab709\partightenfactor0
+
+\f0\fs24 \cf0 \
+\
+Technical_Specification_Local_IBKR_API_12-10-2025\
+\
+\
+Integrate gnzsnz/ib-gateway-docker into my local host computer \
+\
+\
+1. Clone and Set Up Local development environment\
+\
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardeftab709\partightenfactor0
+
+\f1 \cf0 1.0 Core Components:
+\f0 \
+
+\f1 - Container Base: gnzsnz/ib-gateway-docker (latest/stable)
+\f0 \
+
+\f1 - API Framework: FastAPI with Uvicorn ASGI server
+\f0 \
+
+\f1 - Web Framework: React.js with Material-UI components
+\f0 \
+
+\f1 - Database: PostgreSQL for persistent data, Redis for caching
+\f0 \
+
+\f1 - Message Queue: Redis Pub/Sub for real-time communications
+\f0 \
+
+\f1 - Load Balancer: Nginx with health checks
+\f0 \
+
+\f1 - Service Discovery: Consul for service registration and discovery
+\f0 \
+
+\f1 - Monitoring: Prometheus + Grafana for metrics and alerting
+\f0 \
+\
+
+\f1 1.2 Container Specifications for my local host computer
+\f0 \
+\
+
+\f1 1.4 Docker Compose Configuration:
+\f0 \
+
+\f1 version: '3.8'
+\f0 \
+
+\f1 services:
+\f0 \
+
+\f1   stocks-ib-gateway:
+\f0 \
+
+\f1     image: ghcr.io/gnzsnz/ib-gateway:stable
+\f0 \
+
+\f1     platform: linux/x86_64
+\f0 \
+
+\f1     container_name: stocks-ib-gateway
+\f0 \
+
+\f1     environment:
+\f0 \
+
+\f1       TWS_USERID: $\{STOCKS_TWS_USERID\}
+\f0 \
+
+\f1       TWS_PASSWORD: $\{STOCKS_TWS_PASSWORD\}
+\f0 \
+
+\f1       TRADING_MODE: $\{STOCKS_TRADING_MODE:-paper\}
+\f0 \
+
+\f1       AUTO_RESTART_TIME: "01:00 AM"
+\f0 \
+
+\f1       BYPASS_WARNING: "yes"
+\f0 \
+
+\f1       TIME_ZONE: "America/New_York"
+\f0 \
+
+\f1       READ_ONLY_API: "no"
+\f0 \
+
+\f1       JAVA_HEAP_SIZE: "2048"
+\f0 \
+
+\f1       TWS_ACCEPT_INCOMING: "accept"
+\f0 \
+
+\f1     ports:
+\f0 \
+
+\f1       - "127.0.0.1:5001:4003"  # Live trading
+\f0 \
+
+\f1       - "127.0.0.1:5002:4004"  # Paper trading
+\f0 \
+
+\f1       - "127.0.0.1:5900:5900"  # VNC
+\f0 \
+
+\f1     networks:
+\f0 \
+
+\f1       - stocks-network
+\f0 \
+
+\f1     volumes:
+\f0 \
+
+\f1       - stocks-settings:/home/ibgateway/Jts
+\f0 \
+
+\f1       - stocks-logs:/var/log/ibgateway
+\f0 \
+
+\f1     restart: unless-stopped
+\f0 \
+
+\f1     healthcheck:
+\f0 \
+
+\f1       test: ["CMD", "pgrep", "-f", "ibgateway"]
+\f0 \
+
+\f1       interval: 30s
+\f0 \
+
+\f1       timeout: 10s
+\f0 \
+
+\f1       retries: 3
+\f0 \
+
+\f1 \
+  stocks-fastapi:
+\f0 \
+
+\f1     build:
+\f0 \
+
+\f1       context: ./services/stocks-api
+\f0 \
+
+\f1       dockerfile: Dockerfile
+\f0 \
+
+\f1     container_name: stocks-fastapi
+\f0 \
+
+\f1     environment:
+\f0 \
+
+\f1       IB_GATEWAY_HOST: stocks-ib-gateway
+\f0 \
+
+\f1       IB_LIVE_PORT: 4003
+\f0 \
+
+\f1       IB_PAPER_PORT: 4004
+\f0 \
+
+\f1       DATABASE_URL: postgresql://user:pass@postgres:5432/stocks_db
+\f0 \
+
+\f1       REDIS_URL: redis://redis:6379/1
+\f0 \
+
+\f1       JWT_SECRET_KEY: $\{STOCKS_JWT_SECRET\}
+\f0 \
+
+\f1       ENVIRONMENT: $\{ENVIRONMENT:-development\}
+\f0 \
+
+\f1     ports:
+\f0 \
+
+\f1       - "8001:8000"
+\f0 \
+
+\f1     depends_on:
+\f0 \
+
+\f1       - stocks-ib-gateway
+\f0 \
+
+\f1       - postgres
+\f0 \
+
+\f1       - redis
+\f0 \
+
+\f1     networks:
+\f0 \
+
+\f1       - stocks-network
+\f0 \
+
+\f1       - shared-network
+\f0 \
+
+\f1     volumes:
+\f0 \
+
+\f1       - stocks-api-logs:/app/logs
+\f0 \
+
+\f1     restart: unless-stopped
+\f0 \
+
+\f1 \
+  stocks-webapp:
+\f0 \
+
+\f1     build:
+\f0 \
+
+\f1       context: ./services/stocks-webapp
+\f0 \
+
+\f1       dockerfile: Dockerfile
+\f0 \
+
+\f1     container_name: stocks-webapp
+\f0 \
+
+\f1     environment:
+\f0 \
+
+\f1       REACT_APP_API_URL: http://stocks-fastapi:8000
+\f0 \
+
+\f1       REACT_APP_CONTAINER_TYPE: stocks
+\f0 \
+
+\f1     ports:
+\f0 \
+
+\f1       - "3001:3000"
+\f0 \
+
+\f1     depends_on:
+\f0 \
+
+\f1       - stocks-fastapi
+\f0 \
+
+\f1     networks:
+\f0 \
+
+\f1       - stocks-network
+\f0 \
+
+\f1     restart: unless-stopped
+\f0 \
+
+\f1 \
+networks:
+\f0 \
+
+\f1   stocks-network:
+\f0 \
+
+\f1     driver: bridge
+\f0 \
+
+\f1   shared-network:
+\f0 \
+
+\f1     external: true
+\f0 \
+
+\f1 \
+volumes:
+\f0 \
+
+\f1   stocks-settings:
+\f0 \
+
+\f1   stocks-logs:
+\f0 \
+
+\f1   stocks-api-logs:
+\f0 \
+\
+
+\f1 2 Stocks Container Capabilities
+\f0 \
+\
+
+\f1 2.0 Order Management System:
+\f0 \
+
+\f1 - Order Types: Market, Limit, Stop, Stop-Limit, MOC, LOC, Bracket Orders
+\f0 \
+
+\f1 - Order Routing: Smart routing, direct exchange routing, dark pools
+\f0 \
+
+\f1 - Order Validation: Pre-trade risk checks, position limits, buying power
+\f0 \
+
+\f1 - Order Lifecycle: Real-time order status tracking and notifications
+\f0 \
+
+\f1 - Conditional Orders: Price-based, time-based, and volume-based conditions
+\f0 \
+\
+
+\f1 2.2 Market Data Integration:
+\f0 \
+
+\f1 - Level 1 Data: Real-time quotes, last trade, bid/ask spreads
+\f0 \
+
+\f1 - Level 2 Data: Market depth and order book information
+\f0 \
+\
+\
+
+\f1 3 Portfolio Database
+\f0 \
+
+\f1 3.0 Navigation Structure:
+\f0 \
+
+\f1 - Dashboard: Overview, performance metrics, alerts
+\f0 \
+
+\f1 - Positions: Current positions
+\f0 \
+
+\f1 - Asset Lookup: Symbol search, contract details, fundamentals
+\f0 \
+
+\f1 - Orders: Order entry, active orders, order history
+\f0 \
+\
+\
+
+\f1 3.2 Component Library:
+\f0 \
+
+\f1 - Data Tables: Sortable, filterable tables with pagination
+\f0 \
+
+\f1 - Charts: TradingView widgets for price charts and analytics
+\f0 \
+
+\f1 - Forms: Order entry forms with validation and confirmation
+\f0 \
+
+\f1 - Real-time Updates: WebSocket-based live data updates
+\f0 \
+\
+
+\f1 - Level 2 Order Book: Real-time market depth visualization
+\f0 \
+\
+\
+
+\f1 4 Authentication
+\f0 \
+
+\f1 4.0 Authentication 
+\f0 \
+
+\f1 Authentication Framework:
+\f0 \
+
+\f1 # JWT-based authentication with refresh tokens
+\f0 \
+
+\f1 # Multi-factor authentication support
+\f0 \
+
+\f1 # Session management with timeout controls 
+\f0 \
+
+\f1 # API key authentication for programmatic access
+\f0 \
+
+\f1 \
+4.2 Authorization Levels:
+\f0 \
+
+\f1 - Admin: Full system access and user management
+\f0 \
+
+\f1 - Trader: Full system access and user management
+\f0 \
+
+\f1 - Viewer: Full system access and user management
+\f0 \
+\
+\
+\
+
+\f1 5 Security
+\f0 \
+\
+
+\f1 5.0 API Security:
+\f0 \
+\pard\pardeftab709\partightenfactor0
+
+\f1 \cf0 - FastAPI implements JWT or OAuth2 authentication to restrict endpoint access to authorized users or systems.
+\f0 \
+
+\f1 - All API communications use HTTPS (optional TLS certificates via FastAPI configuration).
+\f0 \
+
+\f1 - API ports restricted to `127.0.0.1` to prevent external access; socat relays internal traffic.
+\f0 \
+
+\f1 - Audit logging for all API requests and IB Gateway interactions, stored in `/home/ibgateway/ibc/logs/`.
+\f0 \
+
+\f1 \
+5.2 Secrets Management with HashiCorp Vault or Kubernetes or Infiscal or some other 	recommended package
+\f0 \
+
+\f1 \
+\
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardeftab709\partightenfactor0
+
+\f0 \cf0 6 Maintenance, Operations, Health check and Error handling\
+\
+6.1 Maintenance\
+\pard\pardeftab709\partightenfactor0
+
+\f1 \cf0 - Daily Restarts: Automated via `AUTO_RESTART_TIME` (e.g., 03:00) to meet IBKR requirements, with minimal downtime.
+\f0 \
+
+\f1 - 2FA Re-authentication: Handled weekly by IBC, with `TWOFA_TIMEOUT_ACTION=restart` and `RELOGIN_AFTER_TWOFA_TIMEOUT=yes`.
+\f0 \
+
+\f1 - Logging: Stored in `/home/ibgateway/ibc/logs/` for IB Gateway and FastAPI logs for debugging.
+\f0 \
+
+\f1 \
+6.2 Operations
+\f0 \
+
+\f1  Updates: Automated builds ensure up-to-date IB Gateway versions (`stable` or `latest` tags).
+\f0 \
+
+\f1 -Backup: Persistent volumes for TWS settings and trade logs, backed up via Kubernetes snapshots.
+\f0 \
+
+\f1 \
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardeftab709\partightenfactor0
+\cf0 6.3 Health Checks
+\f0 \
+
+\f1 \
+Container Health Monitoring:
+\f0 \
+
+\f1 # FastAPI health check endpoint
+\f0 \
+
+\f1 @app.get("/health")
+\f0 \
+
+\f1 async def health_check():
+\f0 \
+
+\f1     checks = \{
+\f0 \
+
+\f1         "ib_gateway": await check_ib_connection(),
+\f0 \
+
+\f1         "database": await check_database_connection(),
+\f0 \
+
+\f1         "redis": await check_redis_connection(),
+\f0 \
+
+\f1         "disk_space": check_disk_space(),
+\f0 \
+
+\f1         "memory_usage": check_memory_usage()
+\f0 \
+
+\f1     \}
+\f0 \
+
+\f1     
+\f0 \
+
+\f1     overall_status = "healthy" if all(checks.values()) else "unhealthy"
+\f0 \
+
+\f1     
+\f0 \
+
+\f1     return \{
+\f0 \
+
+\f1         "status": overall_status,
+\f0 \
+
+\f1         "timestamp": datetime.utcnow(),
+\f0 \
+
+\f1         "checks": checks
+\f0 \
+    \}\
+\pard\pardeftab709\partightenfactor0
+
+\f1 \cf0 \
+\
+6.4 Error Handling
+\f0 \
+
+\f1 - Implement reconnection logic in FastAPI to handle IBKR disconnects (e.g., network issues, daily restarts).
+\f0 \
+
+\f1   - Use retry mechanisms for failed API calls, respecting IBKR pacing limits.
+\f0 \
+
+\f1 - Log all errors and API responses for debugging and compliance.
+\f0 \
+
+\f1 - Backup TWS settings and trade logs using persistent volumes.
+\f0 \
+
+\f1 \
+\
+\
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardeftab709\partightenfactor0
+\cf0 7 Redis Configuration
+\f0 \
+\
+\
+
+\f1 8 Metrics Collection
+\f0 \
+
+\f1 \
+8.1 Setup
+\f0 \
+\pard\pardeftab709\partightenfactor0
+
+\f1 \cf0 - Set up Grafana dashboards for container health, API performance, and trading metrics.
+\f0 \
+
+\f1 - Configure alerts for container failures, API errors, or 2FA timeouts.
+\f0 \
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardeftab709\partightenfactor0
+
+\f1 \cf0 Prometheus Metrics:
+\f0 \
+
+\f1 from prometheus_client import Counter, Histogram, Gauge
+\f0 \
+
+\f1 \
+8.2 Business metrics
+\f0 \
+
+\f1 orders_total = Counter('orders_total', 'Total orders placed', ['container', 'order_type'])
+\f0 \
+
+\f1 order_latency = Histogram('order_latency_seconds', 'Order placement latency')
+\f0 \
+
+\f1 active_positions = Gauge('active_positions_total', 'Number of active positions', ['container'])
+\f0 \
+
+\f1 pnl_unrealized = Gauge('pnl_unrealized_total', 'Total unrealized P&L', ['account'])
+\f0 \
+
+\f1 \
+8.3 System metrics
+\f0 \
+
+\f1 api_requests_total = Counter('api_requests_total', 'Total API requests', ['method', 'endpoint'])
+\f0 \
+
+\f1 api_request_duration = Histogram('api_request_duration_seconds', 'API request duration')
+\f0 \
+
+\f1 ib_connection_status = Gauge('ib_connection_status', 'IB Gateway connection status', ['container'])
+\f0 \
+\
+\
+
+\f1 8.4 Alerting Rules
+\f0 \
+
+\f1 \
+Critical Alerts:
+\f0 \
+
+\f1 - IB Gateway connection loss
+\f0 \
+
+\f1 - Database connection failure
+\f0 \
+
+\f1 - High order rejection rate 
+\f0 \
+
+\f1 - Position limit breaches
+\f0 \
+
+\f1 - Unusual P&L movements
+\f0 \
+
+\f1 \
+Warning Alerts:
+\f0 \
+
+\f1 - High API latency
+\f0 \
+
+\f1 - Low disk space
+\f0 \
+
+\f1 - Memory usage above 80%
+\f0 \
+
+\f1 - Failed authentication attempts
+\f0 \
+
+\f1 - Market data feed delays
+\f0 \
+\
+\
+\
+
+\f1 9 Development Best Practices
+\f0 \
+
+\f1 \
+9.10 Code Organization:
+\f0 \
+
+\f1 - Modular Design: Separate services for different concerns
+\f0 \
+
+\f1 - Dependency Injection: Use FastAPI's dependency injection for database and IB connections
+\f0 \
+
+\f1 - Error Handling: Comprehensive error handling with proper HTTP status codes
+\f0 \
+
+\f1 - Input Validation: Use Pydantic models for request/response validation
+\f0 \
+
+\f1 - Documentation: OpenAPI/Swagger documentation for all endpoints
+\f0 \
+
+\f1 \
+9.12 Testing Strategy:
+\f0 \
+
+\f1 - Unit Tests: Test individual functions and classes
+\f0 \
+
+\f1 - Integration Tests: Test API endpoints and database interactions
+\f0 \
+
+\f1 - End-to-End Tests: Test complete trading workflows
+\f0 \
+
+\f1 - Load Testing: Validate system performance under load
+\f0 \
+
+\f1 - Mock Testing: Mock IB Gateway responses for testing
+\f0 \
+
+\f1 \
+9.2 Operational Best Practices
+\f0 \
+
+\f1 \
+9.20 Container Management:
+\f0 \
+
+\f1 - Resource Limits: Set appropriate CPU and memory limits
+\f0 \
+
+\f1 - Health Checks: Implement comprehensive health monitoring
+\f0 \
+
+\f1 - Graceful Shutdown: Handle SIGTERM signals properly
+\f0 \
+
+\f1 - Log Aggregation: Centralized logging with structured logs
+\f0 \
+
+\f1 - Backup Strategy: Regular backups of configuration and data
+\f0 \
+
+\f1 \
+9.22 Security Best Practices:
+\f0 \
+
+\f1 - Secrets Management: Never hardcode credentials
+\f0 \
+
+\f1 - Network Segmentation: Isolate containers with appropriate networks
+\f0 \
+
+\f1 - Regular Updates: Keep base images and dependencies updated
+\f0 \
+
+\f1 - Access Control: Implement principle of least privilege
+\f0 \
+
+\f1 - Audit Logging: Log all trading and administrative actions
+\f0 \
+\
+\
+
+\f1 9.3 Trading Best Practices
+\f0 \
+
+\f1 \
+Risk Management:
+\f0 \
+
+\f1 - Stop Losses: Automatic stop-loss orders for risk control
+\f0 \
+
+\f1 - Circuit Breakers: Automatic trading suspension on large losses
+\f0 \
+
+\f1 \
+Order Management:
+\f0 \
+
+\f1 - Order Validation: Pre-trade risk and compliance checks
+\f0 \
+
+\f1 - Execution Quality: Monitor fill prices and slippage
+\f0 \
+
+\f1 - Order Routing: Use appropriate exchanges and routing
+\f0 \
+
+\f1 - Partial Fills: Handle partial fill scenarios properly
+\f0 \
+
+\f1 - Order Cancellation: Implement proper order cancellation logic
+\f0 \
+\
+
+\f1 9.4 Performance Best Practices
+\f0 \
+
+\f1 \
+9.40 API Optimization:
+\f0 \
+
+\f1 - Connection Pooling: Reuse IB Gateway connections  \cf2 -?
+\f0 \cf0 \
+
+\f1 - Caching: Cache frequently accessed data
+\f0 \
+
+\f1 - Async Operations: Use asyncio for non-blocking operations
+\f0 \
+
+\f1 - Rate Limiting: Respect IB API rate limits
+\f0 \
+
+\f1 - Batch Processing: Batch multiple operations when possible
+\f0 \
+
+\f1 \
+9.42 Database Optimization:
+\f0 \
+
+\f1 - Indexing: Proper database indexing for performance
+\f0 \
+
+\f1 - Connection Pooling: Database connection pooling
+\f0 \
+
+\f1 - Query Optimization: Optimize frequently used queries
+\f0 \
+
+\f1 - Data Archiving: Archive old data to maintain performance
+\f0 \
+
+\f1 - Read Replicas: Use read replicas for reporting queries
+\f0 \
+\
+
+\f1 10.0 Limitations
+\f0 \
+\pard\pardeftab709\partightenfactor0
+
+\f1 \cf0 - **IBKR API Constraints**:
+\f0 \
+
+\f1   - 50 messages/second limit per client.
+\f0 \
+
+\f1   - 8 concurrent market data subscriptions per client.
+\f0 \
+
+\f1   - Pacing restrictions (e.g., 60 historical data requests per 10 minutes).
+\f0 \
+
+\f1 - **Daily Restarts**: Required by IBKR, causing brief interruptions (mitigated by automation).
+\f0 \
+
+\f1 - **Single Account per Container**: Each IB Gateway instance is tied to one IBKR account, requiring multiple containers for multiple accounts.
+\f0 \
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardeftab709\partightenfactor0
+
+\f1 \cf0 - **Resource Overhead**: Multiple containers increase CPU and memory usage (~1\'962GB per IB Gateway, ~100MB per FastAPI).}

@@ -1,0 +1,34 @@
+# Prometheus Configuration
+# Will be fully implemented in Milestone 07
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    environment: 'development'
+    project: 'ibkr-local-api'
+
+# Alertmanager configuration (placeholder)
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+          # - alertmanager:9093
+
+# Load rules once and periodically evaluate them
+rule_files:
+  # - "alert_rules.yml"
+
+# Scrape configurations
+scrape_configs:
+  # Stocks FastAPI metrics
+  - job_name: 'stocks-fastapi'
+    static_configs:
+      - targets: ['stocks-fastapi:8000']
+    metrics_path: '/metrics'
+    scrape_interval: 5s
+
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
