@@ -75,7 +75,6 @@ dist
 .node_repl_history
 *.tgz
 .yarn-integrity
-.env.local
 .env.development.local
 .env.test.local
 .env.production.local
@@ -97,7 +96,7 @@ dist
 .dockerignore
 
 # Environment Variables
-.env
+
 .env.*
 !.env.example
 
@@ -186,3 +185,7 @@ Icon
 *.bak
 *.backup
 *~
+
+# Environment variables (contains secrets!)
+.env
+.env.local
