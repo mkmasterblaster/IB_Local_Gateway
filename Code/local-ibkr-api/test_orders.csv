@@ -1,0 +1,4 @@
+order_type,symbol,action,quantity,limit_price,stop_price,time_in_force,exchange,currency,client_order_id,notes
+MKT,AAPL,BUY,1,,,DAY,SMART,USD,TEST-001,Test market order
+LMT,TSLA,SELL,2,300.00,,GTC,SMART,USD,TEST-002,Test limit order
+STP,NVDA,SELL,1,,185.00,DAY,SMART,USD,TEST-003,Test stop order

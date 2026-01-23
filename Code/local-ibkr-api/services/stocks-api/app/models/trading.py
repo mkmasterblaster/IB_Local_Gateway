@@ -1,3 +1,4 @@
+from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, Numeric, ForeignKey, Text, Index, Enum as SQLEnum, text
 """
 Database models for trading operations.
 
@@ -6,11 +7,7 @@ SQLAlchemy models for orders, fills, positions, and account snapshots.
 from datetime import datetime
 from typing import Optional
 from decimal import Decimal
-
-from sqlalchemy import (
-    Column, Integer, String, Float, DateTime, Boolean,
-    Enum as SQLEnum, ForeignKey, Text, Numeric, Index
-)
+from sqlalchemy.schema import FetchedValue
 from sqlalchemy.orm import relationship, declarative_base
 from sqlalchemy.sql import func
 import enum
@@ -20,11 +17,14 @@ Base = declarative_base()
 
 class OrderType(enum.Enum):
     """Order type enumeration."""
-    MARKET = "MKT"
-    LIMIT = "LMT"
-    STOP = "STP"
-    STOP_LIMIT = "STP LMT"
-    TRAILING_STOP = "TRAIL"
+    MARKET = "MARKET"
+    LIMIT = "LIMIT"
+    STOP = "STOP"
+    STOP_LIMIT = "STOP_LIMIT"
+    TRAILING_STOP = "TRAILING_STOP"
+    BRACKET_PARENT = "BRACKET_PARENT"
+    BRACKET_PROFIT = "BRACKET_PROFIT"
+    BRACKET_STOP = "BRACKET_STOP"
 
 
 class OrderAction(enum.Enum):
@@ -69,7 +69,12 @@ class Order(Base):
 
     # Primary identifiers
     id = Column(Integer, primary_key=True, index=True)
-    order_id = Column(Integer, unique=True, nullable=False, index=True)  # IBKR order ID
+    order_id = Column(
+        Integer,
+        nullable=False, unique=True, index=True,
+        server_default=text("nextval('orders_order_id_seq'::regclass)")
+    )
+    ib_order_id = Column(Integer, nullable=True, index=True)  # IBKR's order ID (can be reused by IB)
     perm_id = Column(Integer, nullable=True, index=True)  # IBKR permanent ID
     client_id = Column(Integer, nullable=False)
 
@@ -113,62 +118,7 @@ class Order(Base):
     fills = relationship("Fill", back_populates="order", cascade="all, delete-orphan")
 
     # Indexes for common queries
-    __table_args__ = (
-        Index('ix_orders_symbol_status', 'symbol', 'status'),
-        Index('ix_orders_created_at_desc', created_at.desc()),
-        Index('ix_orders_account_symbol', 'account', 'symbol'),
-    )
 
-    def __repr__(self):
-        return (
-            f"<Order(id={self.id}, order_id={self.order_id}, "
-            f"symbol={self.symbol}, action={self.action}, "
-            f"quantity={self.total_quantity}, status={self.status})>"
-        )
-
-
-class Fill(Base):
-    """
-    Fill model - represents order executions.
-
-    Tracks individual fills/executions for orders, including
-    partial fills for large orders.
-    """
-    __tablename__ = "fills"
-
-    # Primary identifiers
-    id = Column(Integer, primary_key=True, index=True)
-    exec_id = Column(String(50), unique=True, nullable=False, index=True)
-    order_id = Column(Integer, ForeignKey("orders.order_id"), nullable=False, index=True)
-
-    # Execution details
-    symbol = Column(String(20), nullable=False)
-    side = Column(String(4), nullable=False)  # BUY or SELL
-    shares = Column(Float, nullable=False)
-    price = Column(Numeric(10, 4), nullable=False)
-    exchange = Column(String(20), nullable=False)
-
-    # Cumulative information
-    cum_qty = Column(Float, nullable=False)
-    avg_price = Column(Numeric(10, 4), nullable=False)
-
-    # Commission and fees
-    commission = Column(Numeric(10, 2), nullable=True)
-    commission_currency = Column(String(3), nullable=True)
-    realized_pnl = Column(Numeric(10, 2), nullable=True)
-
-    # Timestamps
-    execution_time = Column(DateTime, nullable=False, index=True)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-
-    # Relationships
-    order = relationship("Order", back_populates="fills")
-
-    # Indexes
-    __table_args__ = (
-        Index('ix_fills_execution_time_desc', execution_time.desc()),
-        Index('ix_fills_symbol_time', 'symbol', execution_time.desc()),
-    )
 
     def __repr__(self):
         return (
@@ -176,6 +126,47 @@ class Fill(Base):
             f"order_id={self.order_id}, shares={self.shares}, price={self.price})>"
         )
 
+
+
+
+class Fill(Base):
+    """
+    Fill model - represents executions/fills.
+    Matches DB table: public.fills
+    FK: fills.order_id -> orders.order_id
+    """
+    __tablename__ = "fills"
+
+    id = Column(Integer, primary_key=True, index=True)
+    exec_id = Column(String(50), nullable=False, unique=True, index=True)
+
+    # IMPORTANT: FK target is orders.order_id (per \d fills)
+    order_id = Column(Integer, ForeignKey("orders.order_id"), nullable=False, index=True)
+
+    symbol = Column(String(20), nullable=False, index=True)
+    side = Column(String(4), nullable=False)
+    shares = Column(Float, nullable=False)
+    price = Column(Numeric(10, 4), nullable=False)
+    exchange = Column(String(20), nullable=False)
+
+    cum_qty = Column(Float, nullable=False)
+    avg_price = Column(Numeric(10, 4), nullable=False)
+
+    commission = Column(Numeric(10, 2), nullable=True)
+    commission_currency = Column(String(3), nullable=True)
+    realized_pnl = Column(Numeric(10, 2), nullable=True)
+
+    execution_time = Column(DateTime, nullable=False, index=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    # backref to Order.fills
+    order = relationship("Order", back_populates="fills")
+
+    def __repr__(self):
+        return (
+            f"<Fill(id={self.id}, exec_id={self.exec_id}, "
+            f"order_id={self.order_id}, shares={self.shares}, price={self.price})>"
+        )
 
 class Position(Base):
     """
@@ -208,11 +199,7 @@ class Position(Base):
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     # Indexes
-    __table_args__ = (
-        Index('ix_positions_account_symbol', 'account', 'symbol'),
-        Index('ix_positions_snapshot_time_desc', snapshot_time.desc()),
-    )
-
+    __table_args__ = ()
     def __repr__(self):
         return (
             f"<Position(id={self.id}, account={self.account}, "
@@ -254,10 +241,7 @@ class AccountSnapshot(Base):
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     # Indexes
-    __table_args__ = (
-        Index('ix_account_snapshots_account_time', 'account', snapshot_time.desc()),
-    )
-
+    __table_args__ = ()
     def __repr__(self):
         return (
             f"<AccountSnapshot(id={self.id}, account={self.account}, "
@@ -300,3 +284,37 @@ class TradingSession(Base):
             f"<TradingSession(id={self.id}, session_id={self.session_id}, "
             f"start={self.start_time}, active={self.is_active})>"
         )
+
+
+class ConditionalOrder(Base):
+    """Conditional orders - execute when condition is met."""
+    __tablename__ = "conditional_orders"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # Condition
+    condition_type = Column(String, nullable=False)  # PRICE_ABOVE, PRICE_BELOW
+    condition_symbol = Column(String, nullable=False, index=True)
+    condition_price = Column(Numeric(precision=10, scale=2), nullable=False)
+    
+    # Order to execute
+    order_symbol = Column(String, nullable=False)
+    order_action = Column(String, nullable=False)  # BUY, SELL
+    order_type = Column(String, nullable=False)  # MKT, LMT
+    order_quantity = Column(Integer, nullable=False)
+    order_limit_price = Column(Numeric(precision=10, scale=2), nullable=True)
+    
+    # Metadata
+    time_in_force = Column(String, default="DAY")
+    exchange = Column(String, default="SMART")
+    currency = Column(String, default="USD")
+    
+    # Status tracking
+    status = Column(String, default="ACTIVE", index=True)  # ACTIVE, TRIGGERED, CANCELLED
+    created_at = Column(DateTime, default=datetime.utcnow)
+    triggered_at = Column(DateTime, nullable=True)
+    executed_order_id = Column(Integer, nullable=True)  # Order ID when triggered
+    
+    # Tracking
+    last_checked_price = Column(Numeric(precision=10, scale=2), nullable=True)
+    last_checked_at = Column(DateTime, nullable=True)

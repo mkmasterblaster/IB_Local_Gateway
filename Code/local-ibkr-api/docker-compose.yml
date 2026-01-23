@@ -1,41 +1,37 @@
 version: '3.8'
-
 services:
-  # ==========================================
-  # IB Gateway - IBKR API Connectivity
-  # ==========================================
   stocks-ib-gateway:
     image: ghcr.io/gnzsnz/ib-gateway:stable
-    platform: linux/amd64  # Required for Apple Silicon
+    platform: linux/amd64
     container_name: stocks-ib-gateway
     environment:
       TWS_USERID: ${STOCKS_TWS_USERID}
       TWS_PASSWORD: ${STOCKS_TWS_PASSWORD}
       TRADING_MODE: ${STOCKS_TRADING_MODE:-paper}
-      READ_ONLY_API: "no"
+      READ_ONLY_API: 'no'
       AUTO_RESTART_TIME: ${AUTO_RESTART_TIME:-01:00}
       TIME_ZONE: ${TIME_ZONE:-America/New_York}
       VNC_SERVER_PASSWORD: ${VNC_PASSWORD:-ibgateway}
     ports:
-      - "127.0.0.1:5001:4002"  # TWS API port
-      - "127.0.0.1:5002:4004"  # TWS API port (backup)
-      - "127.0.0.1:5901:5900"  # VNC for Gateway UI
+    - 127.0.0.1:5001:4002
+    - 127.0.0.1:5002:4004
+    - 127.0.0.1:5901:5900
     volumes:
-      - stocks-settings:/home/ibgateway/Jts
-      - stocks-logs:/var/log/ibgateway
+    - stocks-settings:/home/ibgateway/Jts
+    - stocks-logs:/var/log/ibgateway
     healthcheck:
-      test: ["CMD", "pgrep", "-f", "ibgateway"]
+      test:
+      - CMD
+      - pgrep
+      - -f
+      - ibgateway
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 120s
     restart: unless-stopped
     networks:
-      - stocks-network
-
-  # ==========================================
-  # PostgreSQL Database
-  # ==========================================
+    - stocks-network
   postgres:
     image: postgres:16-alpine
     container_name: stocks-postgres
@@ -43,98 +39,84 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-stocks_db}
       POSTGRES_USER: ${POSTGRES_USER:-stocks_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-stocks_password}
-      POSTGRES_INITDB_ARGS: "-E UTF8 --locale=en_US.UTF-8"
+      POSTGRES_INITDB_ARGS: -E UTF8 --locale=en_US.UTF-8
     ports:
-      - "127.0.0.1:5433:5432"  # Avoid conflict with local Postgres
+    - 127.0.0.1:5433:5432
     volumes:
-      - stocks-db-data:/var/lib/postgresql/data
-      - ./services/stocks-api/db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    - stocks-db-data:/var/lib/postgresql/data
+    - ./services/stocks-api/db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-stocks_user} -d ${POSTGRES_DB:-stocks_db}"]
+      test:
+      - CMD-SHELL
+      - pg_isready -U ${POSTGRES_USER:-stocks_user} -d ${POSTGRES_DB:-stocks_db}
       interval: 10s
       timeout: 5s
       retries: 5
     restart: unless-stopped
     networks:
-      - stocks-network
-
-  # ==========================================
-  # Redis Cache & Pub/Sub
-  # ==========================================
+    - stocks-network
   redis:
     image: redis:7-alpine
     container_name: stocks-redis
     command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
     ports:
-      - "127.0.0.1:6380:6379"  # Avoid conflict with local Redis
+    - 127.0.0.1:6380:6379
     volumes:
-      - stocks-redis-data:/data
+    - stocks-redis-data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test:
+      - CMD
+      - redis-cli
+      - ping
       interval: 10s
       timeout: 3s
       retries: 5
     restart: unless-stopped
     networks:
-      - stocks-network
-
-  # ==========================================
-  # FastAPI Backend
-  # ==========================================
+    - stocks-network
   stocks-fastapi:
     build:
       context: ./services/stocks-api
       dockerfile: Dockerfile
     container_name: stocks-fastapi
     environment:
-      # Application
       ENVIRONMENT: ${ENVIRONMENT:-development}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       LOG_FORMAT: ${LOG_FORMAT:-json}
-      
-      # Database
       DATABASE_URL: postgresql://${POSTGRES_USER:-stocks_user}:${POSTGRES_PASSWORD:-stocks_password}@postgres:5432/${POSTGRES_DB:-stocks_db}
-      
-      # Redis
       REDIS_URL: redis://redis:6379
-      
-      # IB Gateway
       IB_GATEWAY_HOST: stocks-ib-gateway
       IB_GATEWAY_PORT: ${IB_GATEWAY_PORT:-4003}
       IB_CLIENT_ID: ${IB_CLIENT_ID:-999}
-      
-      # Security
       JWT_SECRET: ${STOCKS_JWT_SECRET}
-      
-      # API Configuration
       API_HOST: ${API_HOST:-0.0.0.0}
       API_PORT: ${API_PORT:-8000}
       API_WORKERS: ${API_WORKERS:-1}
     ports:
-      - "127.0.0.1:8000:8000"
+    - 127.0.0.1:8000:8000
     volumes:
-      - stocks-api-logs:/app/logs
-      - ./services/stocks-api/app:/app/app:ro  # Mount source for development
+    - stocks-api-logs:/app/logs
+    - ./services/stocks-api/app:/app/app:ro
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
       stocks-ib-gateway:
-        condition: service_started  # Gateway takes time to fully initialize
+        condition: service_started
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test:
+      - CMD
+      - curl
+      - -f
+      - http://localhost:8000/health
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
     restart: unless-stopped
     networks:
-      - stocks-network
-
-  # ==========================================
-  # React Web Application
-  # ==========================================
+    - stocks-network
   stocks-webapp:
     build:
       context: ./services/stocks-webapp
@@ -145,43 +127,35 @@ services:
       REACT_APP_CONTAINER_TYPE: stocks
       NODE_ENV: ${NODE_ENV:-development}
     ports:
-      - "127.0.0.1:3001:3001"
+    - 127.0.0.1:3001:3001
     depends_on:
-      - stocks-fastapi
+    - stocks-fastapi
     volumes:
-      - ./services/stocks-webapp/src:/app/src:ro  # Mount source for development
+    - ./services/stocks-webapp/src:/app/src:ro
     restart: unless-stopped
     networks:
-      - stocks-network
-
-  # ==========================================
-  # Prometheus Monitoring
-  # ==========================================
+    - stocks-network
   prometheus:
     image: prom/prometheus:latest
     container_name: stocks-prometheus
     command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/etc/prometheus/console_libraries'
-      - '--web.console.templates=/etc/prometheus/consoles'
-      - '--storage.tsdb.retention.time=30d'
-      - '--web.enable-lifecycle'
+    - --config.file=/etc/prometheus/prometheus.yml
+    - --storage.tsdb.path=/prometheus
+    - --web.console.libraries=/etc/prometheus/console_libraries
+    - --web.console.templates=/etc/prometheus/consoles
+    - --storage.tsdb.retention.time=30d
+    - --web.enable-lifecycle
     ports:
-      - "127.0.0.1:9090:9090"
+    - 127.0.0.1:9090:9090
     volumes:
-      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - ./monitoring/prometheus/alerts:/etc/prometheus/alerts:ro
-      - stocks-prometheus-data:/prometheus
+    - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    - ./monitoring/prometheus/alerts:/etc/prometheus/alerts:ro
+    - stocks-prometheus-data:/prometheus
     depends_on:
-      - stocks-fastapi
+    - stocks-fastapi
     restart: unless-stopped
     networks:
-      - stocks-network
-
-  # ==========================================
-  # Grafana Dashboards
-  # ==========================================
+    - stocks-network
   grafana:
     image: grafana/grafana:latest
     container_name: stocks-grafana
@@ -191,52 +165,34 @@ services:
       GF_SERVER_ROOT_URL: http://localhost:3000
       GF_INSTALL_PLUGINS: ''
     ports:
-      - "127.0.0.1:3000:3000"
+    - 127.0.0.1:3000:3000
     volumes:
-      - stocks-grafana-data:/var/lib/grafana
-      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
-      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    - stocks-grafana-data:/var/lib/grafana
+    - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+    - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
     depends_on:
-      - prometheus
+    - prometheus
     restart: unless-stopped
     networks:
-      - stocks-network
-
-# ==========================================
-# Networks
-# ==========================================
+    - stocks-network
 networks:
   stocks-network:
     driver: bridge
     ipam:
       config:
-        - subnet: 172.20.0.0/16
-
-# ==========================================
-# Persistent Volumes
-# ==========================================
+      - subnet: 172.20.0.0/16
 volumes:
-  # IB Gateway persistent data
   stocks-settings:
     driver: local
   stocks-logs:
     driver: local
-  
-  # Application logs
   stocks-api-logs:
     driver: local
-  
-  # Database data
   stocks-db-data:
     driver: local
-  
-  # Redis data
   stocks-redis-data:
     driver: local
-  
-  # Monitoring data
   stocks-prometheus-data:
     driver: local
   stocks-grafana-data:
     driver: local
-

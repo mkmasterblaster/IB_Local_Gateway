@@ -1,7 +1,5 @@
-"""Configuration management using Pydantic Settings."""
-from typing import Optional
+"""Configuration settings for the trading API."""
 from pydantic_settings import BaseSettings
-from functools import lru_cache
 
 
 class Settings(BaseSettings):
@@ -9,47 +7,41 @@ class Settings(BaseSettings):
     
     # Environment
     ENVIRONMENT: str = "development"
-    
-    # API Settings
-    API_HOST: str = "0.0.0.0"
-    API_PORT: int = 8000
+    CONTAINER_NAME: str = "stocks"
     
     # Database
     DATABASE_URL: str = "postgresql://stocks_user:stocks_password@postgres:5432/stocks_db"
-    POSTGRES_DB: str = "stocks_db"
-    POSTGRES_USER: str = "stocks_user"
-    POSTGRES_PASSWORD: str = "stocks_password"
     
     # Redis
-    REDIS_URL: str = "redis://redis:6379"
+    REDIS_URL: str = "redis://redis:6379/0"
     
     # IB Gateway
     IB_GATEWAY_HOST: str = "stocks-ib-gateway"
-    IB_GATEWAY_PORT: int = 4003
-    IB_CLIENT_ID: int = 1
-    IB_ACCOUNT: str = ""
+    IB_GATEWAY_PORT: int = 4002
+    IB_CLIENT_ID: int = 999
     
-    # IBKR Credentials
-    STOCKS_TWS_USERID: str = ""
-    STOCKS_TWS_PASSWORD: str = ""
-    STOCKS_TRADING_MODE: str = "paper"
-    STOCKS_ACCOUNT: str = ""
+    # Market Data Configuration
+    # When you have real-time market data subscription, change to 1
+    # 1 = Real-time (requires subscription)
+    # 2 = Frozen (for testing)
+    # 3 = Delayed (15-20 min delay, no subscription needed)
+    # 4 = Delayed-Frozen
+    MARKET_DATA_TYPE: int = 3  # Change to 1 when you have real-time subscription
     
-    # Security
-    STOCKS_JWT_SECRET: str = "change-this-secret"
-    
-    # Logging
-    LOG_LEVEL: str = "INFO"
-    
-    # Container
-    CONTAINER_NAME: Optional[str] = "stocks"
+    # Conditional Order Check Settings
+    CONDITIONAL_CHECK_PRICE_WAIT: int = 2  # seconds to wait for price data
     
     class Config:
         env_file = ".env"
         case_sensitive = True
 
 
-@lru_cache()
 def get_settings() -> Settings:
-    """Get cached settings instance."""
+    """Get application settings."""
     return Settings()
+
+
+# Export market data settings for easy import
+settings = get_settings()
+MARKET_DATA_TYPE = settings.MARKET_DATA_TYPE
+CONDITIONAL_CHECK_PRICE_WAIT = settings.CONDITIONAL_CHECK_PRICE_WAIT
