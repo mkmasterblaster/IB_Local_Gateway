@@ -1,0 +1,27 @@
+
+# Add to shutdown in lifespan function (around line 50):
+
+async def lifespan(app: FastAPI):
+    """Application lifespan manager."""
+    # Startup
+    logger.info("application_starting", environment=settings.ENVIRONMENT)
+    
+    # ... existing startup code ...
+    
+    yield
+    
+    # Shutdown - IMPORTANT: Clean disconnect
+    logger.info("application_shutting_down")
+    
+    try:
+        # Disconnect IB client properly
+        from app.utils.ib_dependencies import get_ib_client_singleton
+        ib_client = get_ib_client_singleton()
+        if ib_client.is_connected():
+            await ib_client.disconnect()
+            logger.info("ib_client_disconnected_on_shutdown")
+    except Exception as e:
+        logger.error("ib_shutdown_error", error=str(e))
+    
+    await redis_client.disconnect()
+    await shutdown_ib_client()

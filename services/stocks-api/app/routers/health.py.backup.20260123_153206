@@ -1,0 +1,109 @@
+"""Health check endpoints."""
+from fastapi import APIRouter
+from typing import Dict, Any
+import structlog
+from app.utils.database import check_db_health
+from app.utils.redis_client import redis_client
+from app.utils.ib_dependencies import get_ib_client_singleton, peek_ib_client_singleton
+
+logger = structlog.get_logger(__name__)
+
+router = APIRouter(tags=["health"])
+
+
+@router.get("/health")
+async def health_check() -> Dict[str, Any]:
+    """
+    Overall system health check.
+    
+    Checks:
+    - API service status
+    - Database connectivity
+    - Redis connectivity
+    - IB Gateway connection (if applicable)
+    """
+    logger.info("health_check_started")
+    
+    # Check database
+    db_healthy = await check_db_health()
+    
+    # Check Redis
+    redis_healthy = await redis_client.ping()
+    
+    # Check IB Gateway
+    try:
+        ib_client = peek_ib_client_singleton()
+        if ib_client is None:
+            ib_status = "not_initialized"
+        else:
+            ib_status = "connected" if ib_client.is_connected() else "disconnected"
+    except Exception as e:
+        logger.error("ib_health_check_failed", error=str(e))
+        ib_status = "error"
+# Determine overall status
+    overall_status = "healthy" if (db_healthy and redis_healthy) else "unhealthy"
+    
+    result = {
+        "status": overall_status,
+        "services": {
+            "api": "running",
+            "database": "healthy" if db_healthy else "unhealthy",
+            "redis": "healthy" if redis_healthy else "unhealthy",
+            "ib_gateway": ib_status
+        }
+    }
+    
+    logger.info(
+        "health_check_completed",
+        overall_status=overall_status,
+        database="healthy" if db_healthy else "unhealthy",
+        redis="healthy" if redis_healthy else "unhealthy",
+        ib_gateway=ib_status
+    )
+    
+    return result
+
+
+@router.get("/health/live")
+async def liveness_probe() -> Dict[str, str]:
+    """
+    Kubernetes liveness probe.
+    Returns OK if the service is running.
+    """
+    return {"status": "ok"}
+
+
+@router.get("/health/ready")
+async def readiness_probe() -> Dict[str, Any]:
+    """
+    Kubernetes readiness probe.
+    Ready ONLY if service is ready to accept trading traffic.
+    Requires: Database, Redis, AND IB Gateway connection.
+    """
+    db_healthy = await check_db_health()
+    redis_healthy = await redis_client.ping()
+
+    # Require IB to be connected for readiness (avoid creating client as a side-effect)
+    try:
+        ib_client = peek_ib_client_singleton()
+        if ib_client is None:
+            ib_status = "not_initialized"
+            ib_healthy = False
+        else:
+            ib_healthy = bool(ib_client.is_connected())
+            ib_status = "connected" if ib_healthy else "disconnected"
+    except Exception as e:
+        logger.warning("readiness_ib_check_failed", error=str(e))
+        ib_status = "error"
+        ib_healthy = False
+
+    ready = bool(db_healthy and redis_healthy and ib_healthy)
+
+    return {
+        "status": "ready" if ready else "not_ready",
+        "services": {
+            "database": "healthy" if db_healthy else "unhealthy",
+            "redis": "healthy" if redis_healthy else "unhealthy",
+            "ib_gateway": ib_status,
+        }
+    }

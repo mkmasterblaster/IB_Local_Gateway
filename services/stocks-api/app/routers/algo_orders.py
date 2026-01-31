@@ -1,0 +1,188 @@
+from ib_insync import Stock, Order as IBOrder, TagValue
+"""Algorithmic order endpoints - VWAP, TWAP, Adaptive."""
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from datetime import datetime
+import structlog
+
+from app.schemas.trading import AlgoOrderRequest, AlgoOrderResponse
+from app.models.trading import Order, OrderStatus, OrderType
+from app.utils.database import get_db
+from app.utils.ib_dependencies import get_ib_client
+from app.ib_client import IBKRClient
+router = APIRouter(prefix="/algo", tags=["algo-orders"])
+logger = structlog.get_logger()
+
+
+@router.post("/", response_model=AlgoOrderResponse)
+async def place_algo_order(
+    request: AlgoOrderRequest,
+    ib_client: IBKRClient = Depends(get_ib_client),
+    db: Session = Depends(get_db)
+):
+    """
+    Place an algorithmic order (VWAP, TWAP, or Adaptive).
+    
+    **Algo Strategies:**
+    - **VWAP**: Volume Weighted Average Price - executes to match market volume
+    - **TWAP**: Time Weighted Average Price - spreads order evenly over time
+    - **Adaptive**: Arrival Price style - balances speed vs price impact
+    
+    **Parameters:**
+    - start_time/end_time: Trading window (HH:MM:SS)
+    - max_pct_volume: Max % of market volume (VWAP)
+    - time_between_orders: Seconds between child orders (TWAP)
+    - urgency: Urgent/Normal/Patient (Adaptive)
+    """
+    try:
+                
+        # Create contract
+        contract = Stock(
+            symbol=request.symbol,
+            exchange=request.exchange,
+            currency=request.currency
+        )
+        
+        # Create IB order
+        ib_order = IBOrder()
+        # Set algo strategy and parameters
+        ib_order.algoStrategy = request.algo_strategy.upper()
+        # Ensure algo_params exists before first use
+        algo_params = []
+        ib_order.algoParams = algo_params
+        ib_order.action = request.action
+        ib_order.totalQuantity = request.quantity
+        ib_order.tif = request.time_in_force
+        
+        # Set algo strategy
+        ib_order.algoStrategy = request.algo_strategy
+        
+        # Configure algo-specific parameters
+        
+        if request.algo_strategy.upper() == "VWAP":
+            # VWAP parameters
+            if request.start_time:
+                algo_params.append(TagValue("startTime", request.start_time))
+            if request.end_time:
+                algo_params.append(TagValue("endTime", request.end_time))
+            if request.max_pct_volume:
+                algo_params.append(TagValue("maxPctVol", str(request.max_pct_volume)))
+            algo_params.append(TagValue("noTakeLiq", "1"))  # Don't take liquidity
+            
+        elif request.algo_strategy.upper() == "TWAP":
+            # TWAP parameters
+            if request.start_time:
+                algo_params.append(TagValue("startTime", request.start_time))
+            if request.end_time:
+                algo_params.append(TagValue("endTime", request.end_time))
+            algo_params.append(TagValue("strategyType", "Marketable"))
+            if request.time_between_orders:
+                # Calculate number of slices based on time window
+                algo_params.append(TagValue("timeBetweenOrders", str(request.time_between_orders)))
+                
+        elif request.algo_strategy.upper() == "ADAPTIVE":
+            # Adaptive (Arrival Price) parameters
+            algo_params.append(TagValue("adaptivePriority", request.urgency))
+            
+        # Set algo params
+        if algo_params:
+            ib_order.algoParams = algo_params
+        
+        # Set order type and price
+        if request.limit_price:
+            ib_order.orderType = "LMT"
+            ib_order.lmtPrice = request.limit_price
+        else:
+            ib_order.orderType = "MKT"
+        
+        # Place order with IB
+        logger.info(
+            "placing_algo_order",
+            symbol=request.symbol,
+            strategy=request.algo_strategy,
+            quantity=request.quantity
+        )
+        
+        trade = ib_client.ib.placeOrder(contract, ib_order)
+        
+        # Store in database
+        db_order = Order(
+            ib_order_id=ib_order.orderId,
+            symbol=request.symbol,
+            action=request.action,
+            order_type=OrderType.LIMIT if request.limit_price else OrderType.MARKET,
+            total_quantity=request.quantity,
+            limit_price=request.limit_price,
+            status=OrderStatus.SUBMITTED,
+            time_in_force=request.time_in_force,
+            client_id=999,
+            sec_type="STK",
+            exchange=request.exchange,
+            currency=request.currency,
+            filled_quantity=0,
+            remaining_quantity=request.quantity,
+            risk_check_passed=True
+        )
+        
+        db.add(db_order)
+        db.commit()
+        db.refresh(db_order)
+        
+        logger.info(
+            "algo_order_placed",
+            ib_order_id=ib_order.orderId,
+            symbol=request.symbol,
+            strategy=request.algo_strategy
+        )
+        
+        return AlgoOrderResponse(
+            order_id=db_order.order_id,
+            ib_order_id=ib_order.orderId,
+            symbol=request.symbol,
+            action=request.action,
+            quantity=request.quantity,
+            algo_strategy=request.algo_strategy,
+            status="submitted",
+            message=f"{request.algo_strategy} order placed successfully"
+        )
+        
+    except Exception as e:
+        logger.error("algo_order_error", error=str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to place algo order: {str(e)}")
+
+
+@router.get("/strategies")
+async def get_algo_strategies():
+    """Get available algo strategies and their parameters."""
+    return {
+        "strategies": {
+            "VWAP": {
+                "name": "Volume Weighted Average Price",
+                "description": "Executes order to match market volume distribution",
+                "parameters": {
+                    "start_time": "Trading start time (HH:MM:SS)",
+                    "end_time": "Trading end time (HH:MM:SS)",
+                    "max_pct_volume": "Maximum % of market volume (0.0-1.0, default 0.1)"
+                },
+                "use_case": "Large orders that should blend with market volume"
+            },
+            "TWAP": {
+                "name": "Time Weighted Average Price",
+                "description": "Spreads order evenly over specified time period",
+                "parameters": {
+                    "start_time": "Trading start time (HH:MM:SS)",
+                    "end_time": "Trading end time (HH:MM:SS)",
+                    "time_between_orders": "Seconds between child orders (default 60)"
+                },
+                "use_case": "Execute large order with minimal market impact"
+            },
+            "Adaptive": {
+                "name": "Adaptive (Arrival Price)",
+                "description": "Dynamically adjusts based on market conditions",
+                "parameters": {
+                    "urgency": "Urgent, Normal, or Patient (default Normal)"
+                },
+                "use_case": "Balance between execution speed and price improvement"
+            }
+        }
+    }

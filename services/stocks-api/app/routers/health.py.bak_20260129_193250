@@ -1,0 +1,244 @@
+# services/stocks-api/app/routers/health.py
+
+from __future__ import annotations
+
+import time
+from typing import Any, Dict, Optional
+
+from fastapi import APIRouter
+from app.utils.database import check_db_health
+from app.utils.redis_client import redis_client
+from app.utils.ib_dependencies import peek_ib_client_singleton
+from app.utils.logging import get_logger
+
+logger = get_logger(__name__)
+router = APIRouter()
+
+# --- Health thresholds (tune as you like) ---
+DB_WARN_MS = 250
+DB_FAIL_MS = 1500
+
+REDIS_WARN_MS = 100
+REDIS_FAIL_MS = 1000
+
+IB_WARN_MS = 250
+IB_FAIL_MS = 1500
+
+# Readiness requires IB connected
+REQUIRE_IB_FOR_READY = True
+
+
+def _level(ok: bool, warn: bool = False) -> str:
+    if ok:
+        return "warn" if warn else "ok"
+    return "fail"
+
+
+def _overall_status(levels: Dict[str, str], require_ib: bool) -> str:
+    """
+    overall status rules:
+      - fail if db or redis fail
+      - warn if db/redis warn
+      - if require_ib: fail if ib fails; warn if ib warn
+      - else: ib fail only warns (since API can still serve non-trading endpoints)
+    """
+    fail_keys = ["database", "redis"] + (["ib_gateway"] if require_ib else [])
+    warn_keys = ["database", "redis"] + (["ib_gateway"] if require_ib else [])
+
+    if any(levels.get(k) == "fail" for k in fail_keys):
+        return "unhealthy"
+    if any(levels.get(k) == "warn" for k in warn_keys):
+        return "degraded"
+    return "healthy"
+
+
+def _now_iso() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+@router.get("/health")
+async def health_check() -> Dict[str, Any]:
+    """
+    Full health report (human + machine).
+    DB + Redis determine overall health.
+    IB affects "services" status and can degrade overall to "degraded" (not fail).
+    """
+    started = time.perf_counter()
+
+    # ---- DB ----
+    db_t0 = time.perf_counter()
+    db_healthy = await check_db_health()
+    db_ms = (time.perf_counter() - db_t0) * 1000.0
+    db_level = _level(
+        ok=db_healthy,
+        warn=db_healthy and db_ms > DB_WARN_MS,
+    )
+
+    # ---- Redis ----
+    r_t0 = time.perf_counter()
+    try:
+        redis_healthy = await redis_client.ping()
+    except Exception as e:
+        logger.warning("redis_health_check_failed", error=str(e))
+        redis_healthy = False
+    redis_ms = (time.perf_counter() - r_t0) * 1000.0
+    redis_level = _level(
+        ok=bool(redis_healthy),
+        warn=bool(redis_healthy) and redis_ms > REDIS_WARN_MS,
+    )
+
+    # ---- IB (no creation!) ----
+    ib_t0 = time.perf_counter()
+    ib_err: Optional[str] = None
+
+    # Always return the telemetry keys
+    ib_telemetry: Dict[str, Any] = {
+        "connect_attempts": None,
+        "reconnect_attempts": None,
+        "last_connect_error": None,
+        "last_connect_error_at": None,
+        "last_connected_at": None,
+        "last_disconnected_at": None,
+    }
+
+    try:
+        ib_client = peek_ib_client_singleton()
+        if ib_client is None:
+            ib_state = "not_initialized"
+            ib_connected = None
+        else:
+            ib_connected = bool(ib_client.is_connected())
+            for k in ib_telemetry.keys():
+                ib_telemetry[k] = getattr(ib_client, k, None)
+
+            ib_state = "connected" if ib_connected else "disconnected"
+    except Exception as e:
+        ib_err = str(e)
+        ib_state = "error"
+        ib_connected = False
+
+    ib_ms = (time.perf_counter() - ib_t0) * 1000.0
+
+    if ib_state == "connected":
+        ib_level = _level(ok=True, warn=ib_ms > IB_WARN_MS)
+    elif ib_state == "error":
+        ib_level = "error"
+    else:
+        ib_level = "warn"
+
+    ib_payload = {"status": ib_state, "level": ib_level, "telemetry": ib_telemetry}
+    if ib_err:
+        ib_payload["error"] = ib_err
+
+    levels = {
+        "api": "ok",
+        "database": db_level,
+        "redis": redis_level,
+        "ib_gateway": ib_level,
+    }
+
+    overall = _overall_status(levels, require_ib=False)
+    total_ms = (time.perf_counter() - started) * 1000.0
+
+    warnings = []
+    if db_level == "warn":
+        warnings.append(f"database_slow_ms={db_ms:.1f}")
+    if redis_level == "warn":
+        warnings.append(f"redis_slow_ms={redis_ms:.1f}")
+    if ib_level == "warn" and ib_connected is False:
+        warnings.append("ib_disconnected")
+    if ib_err:
+        warnings.append("ib_check_error")
+
+    result: Dict[str, Any] = {
+        "status": overall,
+        "timestamp": _now_iso(),
+        "services": {
+            "api": {"status": "running", "level": "ok"},
+            "database": {"status": "healthy" if db_healthy else "unhealthy", "level": db_level},
+            "redis": {"status": "healthy" if redis_healthy else "unhealthy", "level": redis_level},
+            "ib_gateway": {"status": ib_state, "level": ib_level},
+        },
+        "latency_ms": {
+            "total": round(total_ms, 2),
+            "database": round(db_ms, 2),
+            "redis": round(redis_ms, 2),
+            "ib_gateway": round(ib_ms, 2),
+        },
+        "warnings": warnings,
+    }
+
+    if ib_err:
+        result["services"]["ib_gateway"]["error"] = ib_err
+    if ib_telemetry:
+        result["services"]["ib_gateway"]["telemetry"] = ib_telemetry
+
+    return result
+
+
+@router.get("/health/live")
+async def liveness_probe() -> Dict[str, str]:
+    return {"status": "ok"}
+
+
+@router.get("/health/ready")
+async def readiness_probe() -> Dict[str, Any]:
+    """
+    Readiness = safe to route trading traffic
+    Requires DB + Redis + IB connected (and optional latency warnings)
+    """
+    db_t0 = time.perf_counter()
+    db_healthy = await check_db_health()
+    db_ms = (time.perf_counter() - db_t0) * 1000.0
+    db_level = _level(ok=db_healthy, warn=db_healthy and db_ms > DB_WARN_MS)
+
+    r_t0 = time.perf_counter()
+    try:
+        redis_healthy = await redis_client.ping()
+    except Exception as e:
+        logger.warning("readiness_redis_check_failed", error=str(e))
+        redis_healthy = False
+    redis_ms = (time.perf_counter() - r_t0) * 1000.0
+    redis_level = _level(ok=bool(redis_healthy), warn=bool(redis_healthy) and redis_ms > REDIS_WARN_MS)
+
+    ib_t0 = time.perf_counter()
+    ib_client = None
+    ib_ok = False
+    try:
+        ib_client = peek_ib_client_singleton()
+        if ib_client is not None:
+            ib_ok = bool(ib_client.is_connected())
+    except Exception as e:
+        logger.warning("readiness_ib_check_failed", error=str(e))
+        ib_ok = False
+    ib_ms = (time.perf_counter() - ib_t0) * 1000.0
+
+    if REQUIRE_IB_FOR_READY:
+        ib_level = _level(ok=ib_ok, warn=ib_ok and ib_ms > IB_WARN_MS)
+    else:
+        ib_level = "warn" if not ib_ok else _level(ok=True, warn=ib_ms > IB_WARN_MS)
+
+    levels = {
+        "database": db_level,
+        "redis": redis_level,
+        "ib_gateway": ib_level,
+    }
+
+    ready = (db_level != "fail") and (redis_level != "fail") and (ib_level != "fail")
+
+    if REQUIRE_IB_FOR_READY and not ib_ok:
+        ready = False
+
+    return {
+        "status": "ready" if ready else "not_ready",
+        "services": {
+            "database": {"status": "healthy" if db_healthy else "unhealthy", "level": db_level},
+            "redis": {"status": "healthy" if redis_healthy else "unhealthy", "level": redis_level},
+            "ib_gateway": {"status": "connected" if ib_ok else "disconnected", "level": ib_level},
+        },
+        "latency_ms": {
+            "database": round(db_ms, 2),
+            "redis": round(redis_ms, 2),
+            "ib_gateway": round(ib_ms, 2),
+        },
+    }
