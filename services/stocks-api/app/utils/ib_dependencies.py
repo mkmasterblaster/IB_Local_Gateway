@@ -41,6 +41,15 @@ def create_ib_client() -> IBKRClientProtocol:
     """
     settings = get_settings()
 
+    # Log configuration for debugging
+    logger.info(
+        "ibkr_client_config",
+        host=settings.IB_GATEWAY_HOST,
+        port=settings.IB_GATEWAY_PORT,
+        client_id=settings.IB_CLIENT_ID,
+        container=settings.CONTAINER_NAME,
+    )
+
     # Use mock client in testing environment
     if settings.ENVIRONMENT == "testing":
         logger.info("creating_mock_ibkr_client")
