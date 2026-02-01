@@ -166,7 +166,7 @@ class ConditionalOrderMonitor:
                 limit_price=cond_order.order_limit_price if cond_order.order_type == "LMT" else None,
                 status=OrderStatus.SUBMITTED,
                 time_in_force=cond_order.time_in_force,
-                client_id=999,
+                client_id=settings.IB_CLIENT_ID,
                 sec_type="STK",
                 exchange=cond_order.exchange,
                 currency=cond_order.currency,

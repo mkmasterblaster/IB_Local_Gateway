@@ -85,9 +85,9 @@ services:
       LOG_FORMAT: ${LOG_FORMAT:-json}
       DATABASE_URL: postgresql://${POSTGRES_USER:-stocks_user}:${POSTGRES_PASSWORD:-stocks_password}@postgres:5432/${POSTGRES_DB:-stocks_db}
       REDIS_URL: redis://redis:6379
-      IB_GATEWAY_HOST: stocks-ib-gateway
-      IB_GATEWAY_PORT: ${IB_GATEWAY_PORT:-4003}
-      IB_CLIENT_ID: ${IB_CLIENT_ID:-999}
+      IB_HOST: stocks-ib-gateway
+      IB_PORT: "4002"  # Paper trading port
+      IB_CLIENT_ID: "1101"  # Stocks service - hardcoded, stable
       JWT_SECRET: ${STOCKS_JWT_SECRET}
       API_HOST: ${API_HOST:-0.0.0.0}
       API_PORT: ${API_PORT:-8000}

@@ -10,6 +10,7 @@ from app.models.trading import Order, OrderStatus, OrderType
 from app.utils.database import get_db
 from app.utils.ib_dependencies import get_ib_client
 from app.ib_client import IBKRClient
+from app.config import settings
 router = APIRouter(prefix="/algo", tags=["algo-orders"])
 logger = structlog.get_logger()
 
@@ -115,7 +116,7 @@ async def place_algo_order(
             limit_price=request.limit_price,
             status=OrderStatus.SUBMITTED,
             time_in_force=request.time_in_force,
-            client_id=999,
+            client_id=settings.IB_CLIENT_ID,
             sec_type="STK",
             exchange=request.exchange,
             currency=request.currency,

@@ -20,6 +20,7 @@ from app.config import get_settings
 
 settings = get_settings()
 from app.ib_protocol import IBKRClientProtocol
+from app.config import settings
 from ib_insync import Stock, MarketOrder, LimitOrder, StopOrder
 
 logger = structlog.get_logger(__name__)
@@ -291,7 +292,7 @@ async def place_bracket_order(
             limit_price=request.entry_price if request.entry_type == "LMT" else None,
             status=OrderStatus.SUBMITTED,
             time_in_force=request.time_in_force,
-            client_id=999,
+            client_id=settings.IB_CLIENT_ID,
             sec_type="STK",
             exchange=request.exchange,
             currency=request.currency,
@@ -311,7 +312,7 @@ async def place_bracket_order(
             limit_price=request.profit_target,
             status=OrderStatus.SUBMITTED,
             time_in_force=request.time_in_force,
-            client_id=999,
+            client_id=settings.IB_CLIENT_ID,
             sec_type="STK",
             exchange=request.exchange,
             currency=request.currency,
@@ -331,7 +332,7 @@ async def place_bracket_order(
             stop_price=request.stop_loss,
             status=OrderStatus.SUBMITTED,
             time_in_force=request.time_in_force,
-            client_id=999,
+            client_id=settings.IB_CLIENT_ID,
             sec_type="STK",
             exchange=request.exchange,
             currency=request.currency,
@@ -409,7 +410,7 @@ async def place_trailing_stop(
             total_quantity=request.quantity,
             status=OrderStatus.SUBMITTED,
             time_in_force=request.time_in_force,
-            client_id=999,
+            client_id=settings.IB_CLIENT_ID,
             sec_type="STK",
             exchange=request.exchange,
             currency=request.currency,
@@ -571,7 +572,7 @@ async def place_oco_order(
             stop_price=request.order1_price if request.order1_type == "STP" else None,
             status=OrderStatus.SUBMITTED,
             time_in_force=request.time_in_force,
-            client_id=999,
+            client_id=settings.IB_CLIENT_ID,
             sec_type="STK",
             exchange=request.exchange,
             currency=request.currency,
@@ -592,7 +593,7 @@ async def place_oco_order(
             stop_price=request.order2_price if request.order2_type == "STP" else None,
             status=OrderStatus.SUBMITTED,
             time_in_force=request.time_in_force,
-            client_id=999,
+            client_id=settings.IB_CLIENT_ID,
             sec_type="STK",
             exchange=request.exchange,
             currency=request.currency,

@@ -12,6 +12,7 @@ from app.models.trading import ConditionalOrder
 from app.utils.database import get_db
 from app.ib_client import IBKRClient
 from app.utils.ib_dependencies import get_ib_client
+from app.config import settings
 
 router = APIRouter(prefix="/conditional", tags=["conditional-orders"])
 logger = structlog.get_logger()
@@ -200,7 +201,7 @@ async def check_conditional_orders_manual(
                     limit_price=cond_order.order_limit_price if cond_order.order_type == "LMT" else None,
                     status=OrderStatus.SUBMITTED,
                     time_in_force=cond_order.time_in_force,
-                    client_id=999,
+                    client_id=settings.IB_CLIENT_ID,
                     sec_type="STK",
                     exchange=cond_order.exchange,
                     currency=cond_order.currency,

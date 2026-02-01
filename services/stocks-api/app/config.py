@@ -1,4 +1,5 @@
 """Configuration settings for the trading API."""
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -18,7 +19,10 @@ class Settings(BaseSettings):
     # IB Gateway
     IB_GATEWAY_HOST: str = "stocks-ib-gateway"
     IB_GATEWAY_PORT: int = 4002
-    IB_CLIENT_ID: int = 999
+    IB_CLIENT_ID: int = Field(
+        ...,  # Required, no default
+        description="IBKR clientId - must be unique per running client"
+    )
     
     # Market Data Configuration
     # When you have real-time market data subscription, change to 1
@@ -30,6 +34,24 @@ class Settings(BaseSettings):
     
     # Conditional Order Check Settings
     CONDITIONAL_CHECK_PRICE_WAIT: int = 2  # seconds to wait for price data
+    
+
+    @field_validator("IB_CLIENT_ID")
+    @classmethod
+    def validate_client_id(cls, v: int) -> int:
+        """Validate client ID is not banned and is positive."""
+        banned = {999}  # Known problematic IDs
+        
+        if v in banned:
+            raise ValueError(
+                f"IB_CLIENT_ID {v} is banned. "
+                f"Use stocks range 1101+ (e.g., 1101, 1102, ...)"
+            )
+        
+        if v < 1:
+            raise ValueError("IB_CLIENT_ID must be >= 1")
+        
+        return v
     
     class Config:
         env_file = ".env"

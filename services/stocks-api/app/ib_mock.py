@@ -45,7 +45,7 @@ class MockIBKRClient:
         self,
         host: str = "mock-gateway",
         port: int = 4003,
-        client_id: int = 999,
+        client_id: int = 1101,
         container_name: str = "mock",
         auto_connect: bool = True,
         simulate_delays: bool = False
